@@ -1,0 +1,663 @@
+diff --git a/src/backend/commands/event_trigger.c b/src/backend/commands/event_trigger.c
+index 50c89b8..36d0c5b 100644
+--- a/src/backend/commands/event_trigger.c
++++ b/src/backend/commands/event_trigger.c
+@@ -1913,7 +1913,7 @@ EventTriggerCollectCreateOpClass(CreateOpClassStmt *stmt, Oid opcoid,
+  */
+ void
+ EventTriggerCollectAlterTSConfig(AlterTSConfigurationStmt *stmt, Oid cfgId,
+-								 Oid *dictIds, int ndicts)
++								 Oid *dictIds, int32 *dictOptions, int ndicts)
+ {
+ 	MemoryContext oldcxt;
+ 	CollectedCommand *command;
+@@ -1932,6 +1932,8 @@ EventTriggerCollectAlterTSConfig(AlterTSConfigurationStmt *stmt, Oid cfgId,
+ 					 TSConfigRelationId, cfgId);
+ 	command->d.atscfg.dictIds = palloc(sizeof(Oid) * ndicts);
+ 	memcpy(command->d.atscfg.dictIds, dictIds, sizeof(Oid) * ndicts);
++	command->d.atscfg.dictOptions = palloc(sizeof(int32) * ndicts);
++	memcpy(command->d.atscfg.dictOptions, dictOptions, sizeof(Oid) * ndicts);
+ 	command->d.atscfg.ndicts = ndicts;
+ 	command->parsetree = copyObject(stmt);
+ 
+diff --git a/src/backend/commands/tsearchcmds.c b/src/backend/commands/tsearchcmds.c
+index 69c038c..ded3aef 100644
+--- a/src/backend/commands/tsearchcmds.c
++++ b/src/backend/commands/tsearchcmds.c
+@@ -1103,6 +1103,7 @@ DefineTSConfiguration(List *names, List *parameters, ObjectAddress *copied)
+ 			mapvalues[Anum_pg_ts_config_map_maptokentype - 1] = cfgmap->maptokentype;
+ 			mapvalues[Anum_pg_ts_config_map_mapseqno - 1] = cfgmap->mapseqno;
+ 			mapvalues[Anum_pg_ts_config_map_mapdict - 1] = cfgmap->mapdict;
++			mapvalues[Anum_pg_ts_config_map_mapoptions - 1] = cfgmap->mapoptions;
+ 
+ 			newmaptup = heap_form_tuple(mapRel->rd_att, mapvalues, mapnulls);
+ 
+@@ -1300,6 +1301,7 @@ MakeConfigurationMapping(AlterTSConfigurationStmt *stmt,
+ 	int		   *tokens,
+ 				ntoken;
+ 	Oid		   *dictIds;
++	int32	   *dictOptions;
+ 	int			ndict;
+ 	ListCell   *c;
+ 
+@@ -1341,12 +1343,23 @@ MakeConfigurationMapping(AlterTSConfigurationStmt *stmt,
+ 	 */
+ 	ndict = list_length(stmt->dicts);
+ 	dictIds = (Oid *) palloc(sizeof(Oid) * ndict);
++	dictOptions = (int32 *) palloc(sizeof(int32) * ndict);
+ 	i = 0;
+ 	foreach(c, stmt->dicts)
+ 	{
+-		List	   *names = (List *) lfirst(c);
++		Node	   *dict = (Node *) lfirst(c);
++
++		if (IsA(dict, DictElem))
++		{
++			DictElem	   *dictElem = (DictElem *) dict;
++
++			dictIds[i] = get_ts_dict_oid(dictElem->dictname, false);
++			dictOptions[i] = dictElem->options;
++		}
++		/* In case of REPLACE command */
++		else
++			dictIds[i] = get_ts_dict_oid((List *) dict, false);
+ 
+-		dictIds[i] = get_ts_dict_oid(names, false);
+ 		i++;
+ 	}
+ 
+@@ -1434,6 +1447,7 @@ MakeConfigurationMapping(AlterTSConfigurationStmt *stmt,
+ 				values[Anum_pg_ts_config_map_maptokentype - 1] = Int32GetDatum(tokens[i]);
+ 				values[Anum_pg_ts_config_map_mapseqno - 1] = Int32GetDatum(j + 1);
+ 				values[Anum_pg_ts_config_map_mapdict - 1] = ObjectIdGetDatum(dictIds[j]);
++				values[Anum_pg_ts_config_map_mapoptions - 1] = Int32GetDatum(dictOptions[j]);
+ 
+ 				tup = heap_form_tuple(relMap->rd_att, values, nulls);
+ 				simple_heap_insert(relMap, tup);
+@@ -1444,7 +1458,7 @@ MakeConfigurationMapping(AlterTSConfigurationStmt *stmt,
+ 		}
+ 	}
+ 
+-	EventTriggerCollectAlterTSConfig(stmt, cfgId, dictIds, ndict);
++	EventTriggerCollectAlterTSConfig(stmt, cfgId, dictIds, dictOptions, ndict);
+ }
+ 
+ /*
+@@ -1513,7 +1527,7 @@ DropConfigurationMapping(AlterTSConfigurationStmt *stmt,
+ 		i++;
+ 	}
+ 
+-	EventTriggerCollectAlterTSConfig(stmt, cfgId, NULL, 0);
++	EventTriggerCollectAlterTSConfig(stmt, cfgId, NULL, NULL, 0);
+ }
+ 
+ 
+diff --git a/src/backend/nodes/copyfuncs.c b/src/backend/nodes/copyfuncs.c
+index 3244c76..07fcbf2 100644
+--- a/src/backend/nodes/copyfuncs.c
++++ b/src/backend/nodes/copyfuncs.c
+@@ -4098,6 +4098,17 @@ _copyReassignOwnedStmt(const ReassignOwnedStmt *from)
+ 	return newnode;
+ }
+ 
++static DictElem *
++_copyDictElem(const DictElem *from)
++{
++	DictElem *newnode = makeNode(DictElem);
++
++	COPY_NODE_FIELD(dictname);
++	COPY_SCALAR_FIELD(options);
++
++	return newnode;
++}
++
+ static AlterTSDictionaryStmt *
+ _copyAlterTSDictionaryStmt(const AlterTSDictionaryStmt *from)
+ {
+@@ -4933,6 +4944,9 @@ copyObject(const void *from)
+ 		case T_ReassignOwnedStmt:
+ 			retval = _copyReassignOwnedStmt(from);
+ 			break;
++		case T_DictElem:
++			retval = _copyDictElem(from);
++			break;
+ 		case T_AlterTSDictionaryStmt:
+ 			retval = _copyAlterTSDictionaryStmt(from);
+ 			break;
+diff --git a/src/backend/nodes/equalfuncs.c b/src/backend/nodes/equalfuncs.c
+index 1eb6799..5315a46 100644
+--- a/src/backend/nodes/equalfuncs.c
++++ b/src/backend/nodes/equalfuncs.c
+@@ -2082,6 +2082,15 @@ _equalReassignOwnedStmt(const ReassignOwnedStmt *a, const ReassignOwnedStmt *b)
+ }
+ 
+ static bool
++_equalDictElem(const DictElem *a, const DictElem *b)
++{
++	COMPARE_NODE_FIELD(dictname);
++	COMPARE_SCALAR_FIELD(options);
++
++	return true;
++}
++
++static bool
+ _equalAlterTSDictionaryStmt(const AlterTSDictionaryStmt *a, const AlterTSDictionaryStmt *b)
+ {
+ 	COMPARE_NODE_FIELD(dictname);
+@@ -3237,6 +3246,9 @@ equal(const void *a, const void *b)
+ 		case T_ReassignOwnedStmt:
+ 			retval = _equalReassignOwnedStmt(a, b);
+ 			break;
++		case T_DictElem:
++			retval = _equalDictElem(a, b);
++			break;
+ 		case T_AlterTSDictionaryStmt:
+ 			retval = _equalAlterTSDictionaryStmt(a, b);
+ 			break;
+diff --git a/src/backend/parser/gram.y b/src/backend/parser/gram.y
+index 0cae446..331ea7b 100644
+--- a/src/backend/parser/gram.y
++++ b/src/backend/parser/gram.y
+@@ -227,6 +227,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+ 	struct ImportQual	*importqual;
+ 	InsertStmt			*istmt;
+ 	VariableSetStmt		*vsetstmt;
++	DictElem			*delem;
+ }
+ 
+ %type <node>	stmt schema_stmt
+@@ -372,6 +373,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+ 				create_generic_options alter_generic_options
+ 				relation_expr_list dostmt_opt_list
+ 				transform_element_list transform_type_list
++				dict_list
+ 
+ %type <list>	group_by_list
+ %type <node>	group_by_item empty_grouping_set rollup_clause cube_clause
+@@ -540,6 +542,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+ %type <str>		opt_existing_window_name
+ %type <boolean> opt_if_not_exists
+ 
++%type <delem>	dict_elem
++%type <ival>	dict_option_list dict_option_elem
++
+ /*
+  * Non-keyword token types.  These are hard-wired into the "flex" lexer.
+  * They must be listed first so that their numeric codes do not depend on
+@@ -9156,7 +9161,7 @@ AlterTSDictionaryStmt:
+ 		;
+ 
+ AlterTSConfigurationStmt:
+-			ALTER TEXT_P SEARCH CONFIGURATION any_name ADD_P MAPPING FOR name_list any_with any_name_list
++			ALTER TEXT_P SEARCH CONFIGURATION any_name ADD_P MAPPING FOR name_list any_with dict_list
+ 				{
+ 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+ 					n->kind = ALTER_TSCONFIG_ADD_MAPPING;
+@@ -9167,7 +9172,7 @@ AlterTSConfigurationStmt:
+ 					n->replace = false;
+ 					$$ = (Node*)n;
+ 				}
+-			| ALTER TEXT_P SEARCH CONFIGURATION any_name ALTER MAPPING FOR name_list any_with any_name_list
++			| ALTER TEXT_P SEARCH CONFIGURATION any_name ALTER MAPPING FOR name_list any_with dict_list
+ 				{
+ 					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
+ 					n->kind = ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN;
+@@ -9225,6 +9230,33 @@ any_with:	WITH									{}
+ 			| WITH_LA								{}
+ 		;
+ 
++dict_list:	dict_elem							{ $$ = list_make1($1); }
++			| dict_list ',' dict_elem			{ $$ = lappend($1, $3); }
++		;
++
++dict_elem:	any_name
++				{
++					$$ = makeNode(DictElem);
++					$$->dictname = $1;
++					$$->options = 0;
++				}
++			| any_name '(' dict_option_list ')'
++				{
++					$$ = makeNode(DictElem);
++					$$->dictname = $1;
++					$$->options = $3;
++				}
++		;
++
++dict_option_list:
++			dict_option_elem							{ $$ = $1; }
++			| dict_option_list ',' dict_option_elem		{ $$ = $1 | $3; }
++		;
++
++dict_option_elem:
++			JOIN				{ $$ = DICTELEM_JOIN; }
++		;
++
+ 
+ /*****************************************************************************
+  *
+diff --git a/src/backend/tsearch/ts_parse.c b/src/backend/tsearch/ts_parse.c
+index f0e4269..8dfe499 100644
+--- a/src/backend/tsearch/ts_parse.c
++++ b/src/backend/tsearch/ts_parse.c
+@@ -169,12 +169,60 @@ setNewTmpRes(LexizeData *ld, ParsedLex *lex, TSLexeme *res)
+ }
+ 
+ static TSLexeme *
++appendLexeme(TSLexeme *dst, TSLexeme *src, Size *pos, Size *size,
++			 uint16 *nvariant)
++{
++	TSLexeme   *res = dst,
++			   *src_ptr = src;
++	Size		len = *size,
++				cur = *pos;
++	uint16		maxvariant = *nvariant;
++
++	if (src == NULL)
++		return res;
++
++	while (src_ptr->lexeme)
++	{
++		if (cur == 0 ||
++			cur == len - 1 /* for res[cur].lexeme = NULL */)
++		{
++			len = (len > 0) ? 2 * len : 8;
++			if (res)
++				res = (TSLexeme *) repalloc(res, sizeof(TSLexeme) * len);
++			else
++				res = (TSLexeme *) palloc(sizeof(TSLexeme) * len);
++		}
++
++		res[cur].nvariant = src_ptr->nvariant + *nvariant;
++		res[cur].flags = src_ptr->flags;
++		res[cur].lexeme = src_ptr->lexeme;
++
++		maxvariant = Max(maxvariant, res[cur].nvariant);
++
++		cur++;
++		src_ptr++;
++	}
++
++	*pos = cur;
++	*size = len;
++	*nvariant = maxvariant;
++	/* Mark end of array */
++	res[cur].lexeme = NULL;
++
++	return res;
++}
++
++static TSLexeme *
+ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+ {
+ 	int			i;
+ 	ListDictionary *map;
+ 	TSDictionaryCacheEntry *dict;
+-	TSLexeme   *res;
++	TSLexeme   *res = NULL,
++			   *dict_res;
++	Size		len = 0,
++				cur = 0;
++	uint16		nvariant = 0;
+ 
+ 	if (ld->curDictId == InvalidOid)
+ 	{
+@@ -204,7 +252,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+ 
+ 				ld->dictState.isend = ld->dictState.getnext = false;
+ 				ld->dictState.private_state = NULL;
+-				res = (TSLexeme *) DatumGetPointer(FunctionCall4(
++				dict_res = (TSLexeme *) DatumGetPointer(FunctionCall4(
+ 															 &(dict->lexize),
+ 											 PointerGetDatum(dict->dictData),
+ 												 PointerGetDatum(curValLemm),
+@@ -222,24 +270,47 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+ 					ld->curDictId = DatumGetObjectId(map->dictIds[i]);
+ 					ld->posDict = i + 1;
+ 					ld->curSub = curVal->next;
+-					if (res)
+-						setNewTmpRes(ld, curVal, res);
+-					return LexizeExec(ld, correspondLexem);
+-				}
++					if (dict_res)
++						setNewTmpRes(ld, curVal, dict_res);
+ 
+-				if (!res)		/* dictionary doesn't know this lexeme */
+-					continue;
++					dict_res = LexizeExec(ld, correspondLexem);
++				}
++				else
++				{
++					if (!dict_res)		/* dictionary doesn't know this lexeme */
++						continue;
++
++					if (dict_res->flags & TSL_FILTER)
++					{
++						curValLemm = dict_res->lexeme;
++						curValLenLemm = strlen(dict_res->lexeme);
++						continue;
++					}
++				}
+ 
+-				if (res->flags & TSL_FILTER)
++				/*
++				 * Collect lexems from previous dictionary
++				 * and pass them to next step.
++				 */
++				if (res != NULL || (map->dictOptions[i] & DICTELEM_JOIN) != 0)
+ 				{
+-					curValLemm = res->lexeme;
+-					curValLenLemm = strlen(res->lexeme);
+-					continue;
++					res = appendLexeme(res, dict_res, &cur, &len, &nvariant);
++
++					if (dict_res)
++					{
++						pfree(dict_res);
++						dict_res = NULL;
++					}
+ 				}
+ 
+-				RemoveHead(ld);
+-				setCorrLex(ld, correspondLexem);
+-				return res;
++				/* But if we reach non-join dictionary mapping, then end work */
++				if ((map->dictOptions[i] & DICTELEM_JOIN) == 0)
++				{
++					RemoveHead(ld);
++					setCorrLex(ld, correspondLexem);
++
++					return (res != NULL) ? res : dict_res;
++				}
+ 			}
+ 
+ 			RemoveHead(ld);
+@@ -293,7 +364,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+ 			ld->dictState.isend = (curVal->type == 0) ? true : false;
+ 			ld->dictState.getnext = false;
+ 
+-			res = (TSLexeme *) DatumGetPointer(FunctionCall4(
++			dict_res = (TSLexeme *) DatumGetPointer(FunctionCall4(
+ 															 &(dict->lexize),
+ 											 PointerGetDatum(dict->dictData),
+ 											   PointerGetDatum(curVal->lemm),
+@@ -305,25 +376,25 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+ 			{
+ 				/* Dictionary wants one more */
+ 				ld->curSub = curVal->next;
+-				if (res)
+-					setNewTmpRes(ld, curVal, res);
++				if (dict_res)
++					setNewTmpRes(ld, curVal, dict_res);
+ 				continue;
+ 			}
+ 
+-			if (res || ld->tmpRes)
++			if (dict_res || ld->tmpRes)
+ 			{
+ 				/*
+ 				 * Dictionary normalizes lexemes, so we remove from stack all
+ 				 * used lexemes, return to basic mode and redo end of stack
+ 				 * (if it exists)
+ 				 */
+-				if (res)
++				if (dict_res)
+ 				{
+ 					moveToWaste(ld, ld->curSub);
+ 				}
+ 				else
+ 				{
+-					res = ld->tmpRes;
++					dict_res = ld->tmpRes;
+ 					moveToWaste(ld, ld->lastRes);
+ 				}
+ 
+@@ -333,7 +404,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+ 				ld->lastRes = NULL;
+ 				ld->tmpRes = NULL;
+ 				setCorrLex(ld, correspondLexem);
+-				return res;
++				return dict_res;
+ 			}
+ 
+ 			/*
+@@ -346,7 +417,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+ 	}
+ 
+ 	setCorrLex(ld, correspondLexem);
+-	return NULL;
++	return res;
+ }
+ 
+ /*
+diff --git a/src/backend/utils/cache/ts_cache.c b/src/backend/utils/cache/ts_cache.c
+index 5e4de43..d60d510 100644
+--- a/src/backend/utils/cache/ts_cache.c
++++ b/src/backend/utils/cache/ts_cache.c
+@@ -417,6 +417,7 @@ lookup_ts_config_cache(Oid cfgId)
+ 		HeapTuple	maptup;
+ 		ListDictionary maplists[MAXTOKENTYPE + 1];
+ 		Oid			mapdicts[MAXDICTSPERTT];
++		int32		mapoptions[MAXDICTSPERTT];
+ 		int			maxtokentype;
+ 		int			ndicts;
+ 		int			i;
+@@ -503,9 +504,15 @@ lookup_ts_config_cache(Oid cfgId)
+ 										   sizeof(Oid) * ndicts);
+ 					memcpy(maplists[maxtokentype].dictIds, mapdicts,
+ 						   sizeof(Oid) * ndicts);
++					maplists[maxtokentype].dictOptions = (int32 *)
++						MemoryContextAlloc(CacheMemoryContext,
++										   sizeof(int32) * ndicts);
++					memcpy(maplists[maxtokentype].dictOptions, mapoptions,
++						   sizeof(int32) * ndicts);
+ 				}
+ 				maxtokentype = toktype;
+ 				mapdicts[0] = cfgmap->mapdict;
++				mapoptions[0] = cfgmap->mapoptions;
+ 				ndicts = 1;
+ 			}
+ 			else
+@@ -513,7 +520,9 @@ lookup_ts_config_cache(Oid cfgId)
+ 				/* continuing data for current token type */
+ 				if (ndicts >= MAXDICTSPERTT)
+ 					elog(ERROR, "too many pg_ts_config_map entries for one token type");
+-				mapdicts[ndicts++] = cfgmap->mapdict;
++				mapdicts[ndicts] = cfgmap->mapdict;
++				mapoptions[ndicts] = cfgmap->mapoptions;
++				ndicts++;
+ 			}
+ 		}
+ 
+@@ -530,6 +539,10 @@ lookup_ts_config_cache(Oid cfgId)
+ 								   sizeof(Oid) * ndicts);
+ 			memcpy(maplists[maxtokentype].dictIds, mapdicts,
+ 				   sizeof(Oid) * ndicts);
++			maplists[maxtokentype].dictOptions = (int32 *)
++				MemoryContextAlloc(CacheMemoryContext, sizeof(int32) * ndicts);
++			memcpy(maplists[maxtokentype].dictOptions, mapoptions,
++				   sizeof(int32) * ndicts);
+ 			/* and save the overall map */
+ 			entry->lenmap = maxtokentype + 1;
+ 			entry->map = (ListDictionary *)
+diff --git a/src/include/catalog/catversion.h b/src/include/catalog/catversion.h
+index 25e26db..35abb43 100644
+--- a/src/include/catalog/catversion.h
++++ b/src/include/catalog/catversion.h
+@@ -53,6 +53,6 @@
+  */
+ 
+ /*							yyyymmddN */
+-#define CATALOG_VERSION_NO	201608031
++#define CATALOG_VERSION_NO	201608061
+ 
+ #endif
+diff --git a/src/include/catalog/pg_ts_config_map.h b/src/include/catalog/pg_ts_config_map.h
+index c1753a3..648b194 100644
+--- a/src/include/catalog/pg_ts_config_map.h
++++ b/src/include/catalog/pg_ts_config_map.h
+@@ -36,6 +36,7 @@ CATALOG(pg_ts_config_map,3603) BKI_WITHOUT_OIDS
+ 	int32		maptokentype;	/* token type from parser */
+ 	int32		mapseqno;		/* order in which to consult dictionaries */
+ 	Oid			mapdict;		/* dictionary to consult */
++	int32		mapoptions;		/* dictionary options in mapping */
+ } FormData_pg_ts_config_map;
+ 
+ typedef FormData_pg_ts_config_map *Form_pg_ts_config_map;
+@@ -44,35 +45,36 @@ typedef FormData_pg_ts_config_map *Form_pg_ts_config_map;
+  *		compiler constants for pg_ts_config_map
+  * ----------------
+  */
+-#define Natts_pg_ts_config_map				4
++#define Natts_pg_ts_config_map				5
+ #define Anum_pg_ts_config_map_mapcfg		1
+ #define Anum_pg_ts_config_map_maptokentype	2
+ #define Anum_pg_ts_config_map_mapseqno		3
+ #define Anum_pg_ts_config_map_mapdict		4
++#define Anum_pg_ts_config_map_mapoptions	5
+ 
+ /* ----------------
+  *		initial contents of pg_ts_config_map
+  * ----------------
+  */
+ 
+-DATA(insert ( 3748	1	1	3765 ));
+-DATA(insert ( 3748	2	1	3765 ));
+-DATA(insert ( 3748	3	1	3765 ));
+-DATA(insert ( 3748	4	1	3765 ));
+-DATA(insert ( 3748	5	1	3765 ));
+-DATA(insert ( 3748	6	1	3765 ));
+-DATA(insert ( 3748	7	1	3765 ));
+-DATA(insert ( 3748	8	1	3765 ));
+-DATA(insert ( 3748	9	1	3765 ));
+-DATA(insert ( 3748	10	1	3765 ));
+-DATA(insert ( 3748	11	1	3765 ));
+-DATA(insert ( 3748	15	1	3765 ));
+-DATA(insert ( 3748	16	1	3765 ));
+-DATA(insert ( 3748	17	1	3765 ));
+-DATA(insert ( 3748	18	1	3765 ));
+-DATA(insert ( 3748	19	1	3765 ));
+-DATA(insert ( 3748	20	1	3765 ));
+-DATA(insert ( 3748	21	1	3765 ));
+-DATA(insert ( 3748	22	1	3765 ));
++DATA(insert ( 3748	1	1	3765	0 ));
++DATA(insert ( 3748	2	1	3765	0 ));
++DATA(insert ( 3748	3	1	3765	0 ));
++DATA(insert ( 3748	4	1	3765	0 ));
++DATA(insert ( 3748	5	1	3765	0 ));
++DATA(insert ( 3748	6	1	3765	0 ));
++DATA(insert ( 3748	7	1	3765	0 ));
++DATA(insert ( 3748	8	1	3765	0 ));
++DATA(insert ( 3748	9	1	3765	0 ));
++DATA(insert ( 3748	10	1	3765	0 ));
++DATA(insert ( 3748	11	1	3765	0 ));
++DATA(insert ( 3748	15	1	3765	0 ));
++DATA(insert ( 3748	16	1	3765	0 ));
++DATA(insert ( 3748	17	1	3765	0 ));
++DATA(insert ( 3748	18	1	3765	0 ));
++DATA(insert ( 3748	19	1	3765	0 ));
++DATA(insert ( 3748	20	1	3765	0 ));
++DATA(insert ( 3748	21	1	3765	0 ));
++DATA(insert ( 3748	22	1	3765	0 ));
+ 
+ #endif   /* PG_TS_CONFIG_MAP_H */
+diff --git a/src/include/commands/event_trigger.h b/src/include/commands/event_trigger.h
+index 0e91bf6..41f6c1a 100644
+--- a/src/include/commands/event_trigger.h
++++ b/src/include/commands/event_trigger.h
+@@ -83,7 +83,8 @@ extern void EventTriggerCollectCreateOpClass(CreateOpClassStmt *stmt,
+ 								 Oid opcoid, List *operators,
+ 								 List *procedures);
+ extern void EventTriggerCollectAlterTSConfig(AlterTSConfigurationStmt *stmt,
+-								 Oid cfgId, Oid *dictIds, int ndicts);
++								 Oid cfgId, Oid *dictIds, int32 *dictOptions,
++											 int ndicts);
+ extern void EventTriggerCollectAlterDefPrivs(AlterDefaultPrivilegesStmt *stmt);
+ 
+ #endif   /* EVENT_TRIGGER_H */
+diff --git a/src/include/nodes/nodes.h b/src/include/nodes/nodes.h
+index 6b850e4..3664c1c 100644
+--- a/src/include/nodes/nodes.h
++++ b/src/include/nodes/nodes.h
+@@ -379,6 +379,7 @@ typedef enum NodeTag
+ 	T_CreateEnumStmt,
+ 	T_CreateRangeStmt,
+ 	T_AlterEnumStmt,
++	T_DictElem,
+ 	T_AlterTSDictionaryStmt,
+ 	T_AlterTSConfigurationStmt,
+ 	T_CreateFdwStmt,
+diff --git a/src/include/nodes/parsenodes.h b/src/include/nodes/parsenodes.h
+index 1481fff..a08bf5e 100644
+--- a/src/include/nodes/parsenodes.h
++++ b/src/include/nodes/parsenodes.h
+@@ -3084,6 +3084,21 @@ typedef enum AlterTSConfigType
+ 	ALTER_TSCONFIG_DROP_MAPPING
+ } AlterTSConfigType;
+ 
++/*
++ * DictElem - dictionary parameters
++ */
++typedef enum DictElemOption
++{
++	DICTELEM_JOIN = 1 << 0,			/* join mapping */
++} DictElemOption;
++
++typedef struct DictElem
++{
++	NodeTag		type;
++	List	   *dictname;		/* name of dictionary */
++	int32		options;		/* OR of DictElemOption flags */
++} DictElem;
++
+ typedef struct AlterTSConfigurationStmt
+ {
+ 	NodeTag		type;
+@@ -3095,7 +3110,7 @@ typedef struct AlterTSConfigurationStmt
+ 	 * NIL, but tokentype isn't, DROP MAPPING was specified.
+ 	 */
+ 	List	   *tokentype;		/* list of Value strings */
+-	List	   *dicts;			/* list of list of Value strings */
++	List	   *dicts;			/* list of DictElem */
+ 	bool		override;		/* if true - remove old variant */
+ 	bool		replace;		/* if true - replace dictionary by another */
+ 	bool		missing_ok;		/* for DROP - skip error if missing? */
+diff --git a/src/include/tcop/deparse_utility.h b/src/include/tcop/deparse_utility.h
+index 046184d..6705f97 100644
+--- a/src/include/tcop/deparse_utility.h
++++ b/src/include/tcop/deparse_utility.h
+@@ -91,6 +91,7 @@ typedef struct CollectedCommand
+ 		{
+ 			ObjectAddress address;
+ 			Oid		   *dictIds;
++			int32	   *dictOptions;
+ 			int			ndicts;
+ 		}			atscfg;
+ 
+diff --git a/src/include/tsearch/ts_cache.h b/src/include/tsearch/ts_cache.h
+index 3798933..cba41d4 100644
+--- a/src/include/tsearch/ts_cache.h
++++ b/src/include/tsearch/ts_cache.h
+@@ -66,6 +66,7 @@ typedef struct
+ {
+ 	int			len;
+ 	Oid		   *dictIds;
++	int32	   *dictOptions;
+ } ListDictionary;
+ 
+ typedef struct
+diff --git a/src/test/regress/expected/tsearch.out b/src/test/regress/expected/tsearch.out
+index 129d06e..c95aed3 100644
+--- a/src/test/regress/expected/tsearch.out
++++ b/src/test/regress/expected/tsearch.out
+@@ -51,8 +51,8 @@ RIGHT JOIN pg_ts_config_map AS m
+     ON (tt.cfgid=m.mapcfg AND tt.tokid=m.maptokentype)
+ WHERE
+     tt.cfgid IS NULL OR tt.tokid IS NULL;
+- cfgid | tokid | mapcfg | maptokentype | mapseqno | mapdict 
+--------+-------+--------+--------------+----------+---------
++ cfgid | tokid | mapcfg | maptokentype | mapseqno | mapdict | mapoptions 
++-------+-------+--------+--------------+----------+---------+------------
+ (0 rows)
+ 
+ -- test basic text search behavior without indexes, then with
