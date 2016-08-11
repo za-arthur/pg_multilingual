@@ -1,0 +1,75 @@
+## Multilingual patch for PostgreSQL
+
+Sometimes there is a need in text search using different dictionaries in same
+text. In this case users combine necessary dictionaries into one dictionary
+file. Usually it is hard task.
+
+This patch allow to use different text search dictionaries in one text using one
+text search configuration.
+
+## Installation
+
+This patch can be applyed to [master PostgreSQL](https://github.com/postgres/postgres):
+
+    $ git clone git@github.com:select-artur/pg_multilingual.git
+    $ git clone git@github.com:select-artur/postgres.git
+    $ cd postgres
+    $ git apply ../pg_multilingual/pg_multilingual.patch
+    $ ./configure
+    $ make
+    $ make install
+
+## Usage
+
+Let's suppose you already have **german_hunspell** and **english_hunspell**
+dictionaries. You need to execute the following query to create multilingual
+configuration:
+
+```sql
+=> CREATE TEXT SEARCH CONFIGURATION multi_conf (COPY=simple);
+=> ALTER TEXT SEARCH CONFIGURATION multi_conf
+	ALTER MAPPING FOR asciiword, asciihword, hword_asciipart,
+	word, hword, hword_part
+	WITH german_hunspell (JOIN), english_hunspell (JOIN);
+```
+
+After this you can query documents with german and english words.
+
+## Example
+
+**apod_en_ru.dump** is the dump of test base. To restore this dump you need
+russian and english hunspell dictionaries from [hunspell_dicts](https://github.com/postgrespro/hunspell_dicts):
+
+    $ git clone git@github.com:postgrespro/hunspell_dicts.git
+    $ cd hunspell_dicts
+    $ make -C hunspell_en_us USE_PGXS=1 install
+    $ make -C hunspell_ru_ru USE_PGXS=1 install
+
+After this dictionary files were copied to the PostgreSQL share directory.
+
+You need to restore the dump:
+
+    $ psql apod < pg_multilingual/apod_en_ru.dump
+
+This command will create the following objects:
+
+- **hunspell_en_us** and **hunspell_ru_ru** extensions
+- **english_hunspell** and **russian_hunspell** dictionaries
+- **apod_conf** configuration
+- **apod** table with english and russian documents
+
+Here example queries:
+
+```sql
+=> SELECT title FROM apod WHERE fts @@ to_tsquery('apod_conf', 'star') LIMIT 1;
+              title
+---------------------------------
+ Arcs and Jets in Herbig-Haro 34
+(1 row)
+
+=> SELECT title FROM apod WHERE fts @@ to_tsquery('apod_conf', 'звезда') LIMIT 1;
+                                  title
+--------------------------------------------------------------------------
+ Туманность ``Фейерверк'', известная астрономам под названием ``GK Per'',
+(1 row)
+```

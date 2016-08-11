@@ -480,6 +480,61 @@ index 5e4de43..d60d510 100644
  			/* and save the overall map */
  			entry->lenmap = maxtokentype + 1;
  			entry->map = (ListDictionary *)
+diff --git a/src/bin/pg_dump/pg_dump.c b/src/bin/pg_dump/pg_dump.c
+index 4ee10fc..b7cb684 100644
+--- a/src/bin/pg_dump/pg_dump.c
++++ b/src/bin/pg_dump/pg_dump.c
+@@ -53,6 +53,7 @@
+ #include "catalog/pg_largeobject_metadata.h"
+ #include "catalog/pg_proc.h"
+ #include "catalog/pg_trigger.h"
++#include "catalog/pg_ts_config_map.h"
+ #include "catalog/pg_type.h"
+ #include "libpq/libpq-fs.h"
+ 
+@@ -14108,6 +14109,7 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+ 				i;
+ 	int			i_tokenname;
+ 	int			i_dictname;
++	int			i_options;
+ 
+ 	/* Skip if not to be dumped */
+ 	if (!cfginfo->dobj.dump || dopt->dataOnly)
+@@ -14146,7 +14148,8 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+ 					  "SELECT \n"
+ 					  "  ( SELECT alias FROM pg_catalog.ts_token_type('%u'::pg_catalog.oid) AS t \n"
+ 					  "    WHERE t.tokid = m.maptokentype ) AS tokenname, \n"
+-					  "  m.mapdict::pg_catalog.regdictionary AS dictname \n"
++					  "  m.mapdict::pg_catalog.regdictionary AS dictname, \n"
++					  "  m.mapoptions AS options \n"
+ 					  "FROM pg_catalog.pg_ts_config_map AS m \n"
+ 					  "WHERE m.mapcfg = '%u' \n"
+ 					  "ORDER BY m.mapcfg, m.maptokentype, m.mapseqno",
+@@ -14157,11 +14160,13 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+ 
+ 	i_tokenname = PQfnumber(res, "tokenname");
+ 	i_dictname = PQfnumber(res, "dictname");
++	i_options = PQfnumber(res, "options");
+ 
+ 	for (i = 0; i < ntups; i++)
+ 	{
+ 		char	   *tokenname = PQgetvalue(res, i, i_tokenname);
+ 		char	   *dictname = PQgetvalue(res, i, i_dictname);
++		int			options = atoi(PQgetvalue(res, i, i_options));
+ 
+ 		if (i == 0 ||
+ 			strcmp(tokenname, PQgetvalue(res, i - 1, i_tokenname)) != 0)
+@@ -14177,6 +14182,10 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+ 		}
+ 		else
+ 			appendPQExpBuffer(q, ", %s", dictname);
++
++		/* append mapping options */
++		if (options & DICTELEM_JOIN)
++			appendPQExpBuffer(q, " (JOIN)");
+ 	}
+ 
+ 	if (ntups > 0)
 diff --git a/src/include/catalog/catversion.h b/src/include/catalog/catversion.h
 index 25e26db..35abb43 100644
 --- a/src/include/catalog/catversion.h
@@ -493,7 +548,7 @@ index 25e26db..35abb43 100644
  
  #endif
 diff --git a/src/include/catalog/pg_ts_config_map.h b/src/include/catalog/pg_ts_config_map.h
-index c1753a3..648b194 100644
+index c1753a3..a32c934 100644
 --- a/src/include/catalog/pg_ts_config_map.h
 +++ b/src/include/catalog/pg_ts_config_map.h
 @@ -36,6 +36,7 @@ CATALOG(pg_ts_config_map,3603) BKI_WITHOUT_OIDS
@@ -504,7 +559,7 @@ index c1753a3..648b194 100644
  } FormData_pg_ts_config_map;
  
  typedef FormData_pg_ts_config_map *Form_pg_ts_config_map;
-@@ -44,35 +45,36 @@ typedef FormData_pg_ts_config_map *Form_pg_ts_config_map;
+@@ -44,35 +45,42 @@ typedef FormData_pg_ts_config_map *Form_pg_ts_config_map;
   *		compiler constants for pg_ts_config_map
   * ----------------
   */
@@ -515,6 +570,12 @@ index c1753a3..648b194 100644
  #define Anum_pg_ts_config_map_mapseqno		3
  #define Anum_pg_ts_config_map_mapdict		4
 +#define Anum_pg_ts_config_map_mapoptions	5
++
++/* ----------------
++ *		compiler constant for mapoptions
++ * ----------------
++ */
++#define DICTELEM_JOIN		1 << 0			/* join mapping */
  
  /* ----------------
   *		initial contents of pg_ts_config_map
@@ -588,21 +649,16 @@ index 6b850e4..3664c1c 100644
  	T_AlterTSConfigurationStmt,
  	T_CreateFdwStmt,
 diff --git a/src/include/nodes/parsenodes.h b/src/include/nodes/parsenodes.h
-index 1481fff..a08bf5e 100644
+index 1481fff..c0848c9 100644
 --- a/src/include/nodes/parsenodes.h
 +++ b/src/include/nodes/parsenodes.h
-@@ -3084,6 +3084,21 @@ typedef enum AlterTSConfigType
+@@ -3084,6 +3084,16 @@ typedef enum AlterTSConfigType
  	ALTER_TSCONFIG_DROP_MAPPING
  } AlterTSConfigType;
  
 +/*
 + * DictElem - dictionary parameters
 + */
-+typedef enum DictElemOption
-+{
-+	DICTELEM_JOIN = 1 << 0,			/* join mapping */
-+} DictElemOption;
-+
 +typedef struct DictElem
 +{
 +	NodeTag		type;
@@ -613,7 +669,7 @@ index 1481fff..a08bf5e 100644
  typedef struct AlterTSConfigurationStmt
  {
  	NodeTag		type;
-@@ -3095,7 +3110,7 @@ typedef struct AlterTSConfigurationStmt
+@@ -3095,7 +3105,7 @@ typedef struct AlterTSConfigurationStmt
  	 * NIL, but tokentype isn't, DROP MAPPING was specified.
  	 */
  	List	   *tokentype;		/* list of Value strings */
