@@ -155,10 +155,18 @@ index 1eb6799..5315a46 100644
  			retval = _equalAlterTSDictionaryStmt(a, b);
  			break;
 diff --git a/src/backend/parser/gram.y b/src/backend/parser/gram.y
-index 0cae446..331ea7b 100644
+index 6a0f7b3..809d835 100644
 --- a/src/backend/parser/gram.y
 +++ b/src/backend/parser/gram.y
-@@ -227,6 +227,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+@@ -53,6 +53,7 @@
+ #include "catalog/namespace.h"
+ #include "catalog/pg_am.h"
+ #include "catalog/pg_trigger.h"
++#include "catalog/pg_ts_config_map.h"
+ #include "commands/defrem.h"
+ #include "commands/trigger.h"
+ #include "nodes/makefuncs.h"
+@@ -227,6 +228,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  	struct ImportQual	*importqual;
  	InsertStmt			*istmt;
  	VariableSetStmt		*vsetstmt;
@@ -166,7 +174,7 @@ index 0cae446..331ea7b 100644
  }
  
  %type <node>	stmt schema_stmt
-@@ -372,6 +373,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+@@ -372,6 +374,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  				create_generic_options alter_generic_options
  				relation_expr_list dostmt_opt_list
  				transform_element_list transform_type_list
@@ -174,7 +182,7 @@ index 0cae446..331ea7b 100644
  
  %type <list>	group_by_list
  %type <node>	group_by_item empty_grouping_set rollup_clause cube_clause
-@@ -540,6 +542,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+@@ -540,6 +543,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  %type <str>		opt_existing_window_name
  %type <boolean> opt_if_not_exists
  
@@ -184,7 +192,7 @@ index 0cae446..331ea7b 100644
  /*
   * Non-keyword token types.  These are hard-wired into the "flex" lexer.
   * They must be listed first so that their numeric codes do not depend on
-@@ -9156,7 +9161,7 @@ AlterTSDictionaryStmt:
+@@ -9156,7 +9162,7 @@ AlterTSDictionaryStmt:
  		;
  
  AlterTSConfigurationStmt:
@@ -193,7 +201,7 @@ index 0cae446..331ea7b 100644
  				{
  					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
  					n->kind = ALTER_TSCONFIG_ADD_MAPPING;
-@@ -9167,7 +9172,7 @@ AlterTSConfigurationStmt:
+@@ -9167,7 +9173,7 @@ AlterTSConfigurationStmt:
  					n->replace = false;
  					$$ = (Node*)n;
  				}
@@ -202,7 +210,7 @@ index 0cae446..331ea7b 100644
  				{
  					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
  					n->kind = ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN;
-@@ -9225,6 +9230,33 @@ any_with:	WITH									{}
+@@ -9225,6 +9231,33 @@ any_with:	WITH									{}
  			| WITH_LA								{}
  		;
  
@@ -236,11 +244,82 @@ index 0cae446..331ea7b 100644
  
  /*****************************************************************************
   *
+diff --git a/src/backend/tsearch/dict_simple.c b/src/backend/tsearch/dict_simple.c
+index e3f06db..2e23a10 100644
+--- a/src/backend/tsearch/dict_simple.c
++++ b/src/backend/tsearch/dict_simple.c
+@@ -22,6 +22,8 @@ typedef struct
+ {
+ 	StopList	stoplist;
+ 	bool		accept;
++	int32		minlen;
++	int32		stemlen;
+ } DictSimple;
+ 
+ 
+@@ -31,7 +33,9 @@ dsimple_init(PG_FUNCTION_ARGS)
+ 	List	   *dictoptions = (List *) PG_GETARG_POINTER(0);
+ 	DictSimple *d = (DictSimple *) palloc0(sizeof(DictSimple));
+ 	bool		stoploaded = false,
+-				acceptloaded = false;
++				acceptloaded = false,
++				minlenloaded = false,
++				stemlenloaded = false;
+ 	ListCell   *l;
+ 
+ 	d->accept = true;			/* default */
+@@ -58,6 +62,24 @@ dsimple_init(PG_FUNCTION_ARGS)
+ 			d->accept = defGetBoolean(defel);
+ 			acceptloaded = true;
+ 		}
++		else if (pg_strcasecmp("MinLength", defel->defname) == 0)
++		{
++			if (minlenloaded)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("multiple MinLength parameters")));
++			d->minlen = atoi(defGetString(defel));
++			minlenloaded = true;
++		}
++		else if (pg_strcasecmp("StemLength", defel->defname) == 0)
++		{
++			if (stemlenloaded)
++				ereport(ERROR,
++						(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
++						 errmsg("multiple StemLength parameters")));
++			d->stemlen = atoi(defGetString(defel));
++			stemlenloaded = true;
++		}
+ 		else
+ 		{
+ 			ereport(ERROR,
+@@ -78,8 +100,12 @@ dsimple_lexize(PG_FUNCTION_ARGS)
+ 	int32		len = PG_GETARG_INT32(2);
+ 	char	   *txt;
+ 	TSLexeme   *res;
++	int32		out_len;
+ 
+-	txt = lowerstr_with_len(in, len);
++	out_len = Max(d->minlen, len - d->stemlen);
++	if (out_len <= 0)
++		out_len = len;
++	txt = lowerstr_with_len(in, out_len);
+ 
+ 	if (*txt == '\0' || searchstoplist(&(d->stoplist), txt))
+ 	{
 diff --git a/src/backend/tsearch/ts_parse.c b/src/backend/tsearch/ts_parse.c
-index f0e4269..8dfe499 100644
+index f0e4269..4c0e3c4 100644
 --- a/src/backend/tsearch/ts_parse.c
 +++ b/src/backend/tsearch/ts_parse.c
-@@ -169,12 +169,60 @@ setNewTmpRes(LexizeData *ld, ParsedLex *lex, TSLexeme *res)
+@@ -14,6 +14,7 @@
+ 
+ #include "postgres.h"
+ 
++#include "catalog/pg_ts_config_map.h"
+ #include "tsearch/ts_cache.h"
+ #include "tsearch/ts_utils.h"
+ 
+@@ -169,12 +170,60 @@ setNewTmpRes(LexizeData *ld, ParsedLex *lex, TSLexeme *res)
  }
  
  static TSLexeme *
@@ -302,7 +381,7 @@ index f0e4269..8dfe499 100644
  
  	if (ld->curDictId == InvalidOid)
  	{
-@@ -204,7 +252,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+@@ -204,7 +253,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
  
  				ld->dictState.isend = ld->dictState.getnext = false;
  				ld->dictState.private_state = NULL;
@@ -311,7 +390,7 @@ index f0e4269..8dfe499 100644
  															 &(dict->lexize),
  											 PointerGetDatum(dict->dictData),
  												 PointerGetDatum(curValLemm),
-@@ -222,24 +270,47 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+@@ -222,24 +271,47 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
  					ld->curDictId = DatumGetObjectId(map->dictIds[i]);
  					ld->posDict = i + 1;
  					ld->curSub = curVal->next;
@@ -372,7 +451,7 @@ index f0e4269..8dfe499 100644
  			}
  
  			RemoveHead(ld);
-@@ -293,7 +364,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+@@ -293,7 +365,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
  			ld->dictState.isend = (curVal->type == 0) ? true : false;
  			ld->dictState.getnext = false;
  
@@ -381,7 +460,7 @@ index f0e4269..8dfe499 100644
  															 &(dict->lexize),
  											 PointerGetDatum(dict->dictData),
  											   PointerGetDatum(curVal->lemm),
-@@ -305,25 +376,25 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+@@ -305,25 +377,25 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
  			{
  				/* Dictionary wants one more */
  				ld->curSub = curVal->next;
@@ -412,7 +491,7 @@ index f0e4269..8dfe499 100644
  					moveToWaste(ld, ld->lastRes);
  				}
  
-@@ -333,7 +404,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+@@ -333,7 +405,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
  				ld->lastRes = NULL;
  				ld->tmpRes = NULL;
  				setCorrLex(ld, correspondLexem);
@@ -421,7 +500,7 @@ index f0e4269..8dfe499 100644
  			}
  
  			/*
-@@ -346,7 +417,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
+@@ -346,7 +418,7 @@ LexizeExec(LexizeData *ld, ParsedLex **correspondLexem)
  	}
  
  	setCorrLex(ld, correspondLexem);
@@ -481,7 +560,7 @@ index 5e4de43..d60d510 100644
  			entry->lenmap = maxtokentype + 1;
  			entry->map = (ListDictionary *)
 diff --git a/src/bin/pg_dump/pg_dump.c b/src/bin/pg_dump/pg_dump.c
-index 4ee10fc..b7cb684 100644
+index a5c2d09..010f0bd 100644
 --- a/src/bin/pg_dump/pg_dump.c
 +++ b/src/bin/pg_dump/pg_dump.c
 @@ -53,6 +53,7 @@
@@ -492,7 +571,7 @@ index 4ee10fc..b7cb684 100644
  #include "catalog/pg_type.h"
  #include "libpq/libpq-fs.h"
  
-@@ -14108,6 +14109,7 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+@@ -14109,6 +14110,7 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
  				i;
  	int			i_tokenname;
  	int			i_dictname;
@@ -500,7 +579,7 @@ index 4ee10fc..b7cb684 100644
  
  	/* Skip if not to be dumped */
  	if (!cfginfo->dobj.dump || dopt->dataOnly)
-@@ -14146,7 +14148,8 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+@@ -14147,7 +14149,8 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
  					  "SELECT \n"
  					  "  ( SELECT alias FROM pg_catalog.ts_token_type('%u'::pg_catalog.oid) AS t \n"
  					  "    WHERE t.tokid = m.maptokentype ) AS tokenname, \n"
@@ -510,7 +589,7 @@ index 4ee10fc..b7cb684 100644
  					  "FROM pg_catalog.pg_ts_config_map AS m \n"
  					  "WHERE m.mapcfg = '%u' \n"
  					  "ORDER BY m.mapcfg, m.maptokentype, m.mapseqno",
-@@ -14157,11 +14160,13 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+@@ -14158,11 +14161,13 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
  
  	i_tokenname = PQfnumber(res, "tokenname");
  	i_dictname = PQfnumber(res, "dictname");
@@ -524,7 +603,7 @@ index 4ee10fc..b7cb684 100644
  
  		if (i == 0 ||
  			strcmp(tokenname, PQgetvalue(res, i - 1, i_tokenname)) != 0)
-@@ -14177,6 +14182,10 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+@@ -14178,6 +14183,10 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
  		}
  		else
  			appendPQExpBuffer(q, ", %s", dictname);
@@ -536,15 +615,15 @@ index 4ee10fc..b7cb684 100644
  
  	if (ntups > 0)
 diff --git a/src/include/catalog/catversion.h b/src/include/catalog/catversion.h
-index 25e26db..35abb43 100644
+index 2ca3cd9..4df1b26 100644
 --- a/src/include/catalog/catversion.h
 +++ b/src/include/catalog/catversion.h
 @@ -53,6 +53,6 @@
   */
  
  /*							yyyymmddN */
--#define CATALOG_VERSION_NO	201608031
-+#define CATALOG_VERSION_NO	201608061
+-#define CATALOG_VERSION_NO	201608131
++#define CATALOG_VERSION_NO	201608151
  
  #endif
 diff --git a/src/include/catalog/pg_ts_config_map.h b/src/include/catalog/pg_ts_config_map.h
