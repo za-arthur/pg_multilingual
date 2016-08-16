@@ -19,6 +19,37 @@ This patch can be applyed to [master PostgreSQL](https://github.com/postgres/pos
     $ make
     $ make install
 
+## Changes
+
+### New option for text search configuration mapping: **JOIN**
+
+In PostgreSQL's text search configuration for each token type you can specify a
+list of dictionaries. PostgreSQL uses each dictionary to normalize words into
+lexems using loop. Original PostgreSQL stops word normalizing if some dicitonary
+recognizes it as a known word.
+
+With option **JOIN** PostgreSQL return all recognized lexems until the end of a
+list of dictionaries or a configuration mapping without this option are occured.
+It is usefull if you don't know in what language a document is wrote.
+
+### New options for the **simple** dictionary template: **MinLength** and **StemLength**
+
+This options allow to **simple** dictionary trancate words suffixes for all
+languages. For example:
+
+```sql
+=> CREATE TEXT SEARCH DICTIONARY simple_stem (
+	Template = simple,
+	Stopwords = english,
+	MinLength = 3,
+	StemLength = 3);
+=> SELECT ts_lexize('simple_stem', 'stemthis');
+ ts_lexize
+-----------
+ {stemt}
+(1 row)
+```
+
 ## Usage
 
 Let's suppose you already have **german_hunspell** and **english_hunspell**
@@ -30,7 +61,7 @@ configuration:
 => ALTER TEXT SEARCH CONFIGURATION multi_conf
 	ALTER MAPPING FOR asciiword, asciihword, hword_asciipart,
 	word, hword, hword_part
-	WITH german_hunspell (JOIN), english_hunspell (JOIN);
+	WITH german_hunspell (JOIN), english_hunspell, simple_stem;
 ```
 
 After this you can query documents with german and english words.
@@ -54,7 +85,7 @@ You need to restore the dump:
 This command will create the following objects:
 
 - **hunspell_en_us** and **hunspell_ru_ru** extensions
-- **english_hunspell** and **russian_hunspell** dictionaries
+- **english_hunspell**, **russian_hunspell** and **simple_stem** dictionaries
 - **apod_conf** configuration
 - **apod** table with english and russian documents
 
