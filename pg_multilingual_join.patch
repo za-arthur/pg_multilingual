@@ -116,10 +116,10 @@ index 69c038c..ded3aef 100644
  
  
 diff --git a/src/backend/nodes/copyfuncs.c b/src/backend/nodes/copyfuncs.c
-index 3244c76..07fcbf2 100644
+index c7a0644..d280051 100644
 --- a/src/backend/nodes/copyfuncs.c
 +++ b/src/backend/nodes/copyfuncs.c
-@@ -4098,6 +4098,17 @@ _copyReassignOwnedStmt(const ReassignOwnedStmt *from)
+@@ -4114,6 +4114,17 @@ _copyReassignOwnedStmt(const ReassignOwnedStmt *from)
  	return newnode;
  }
  
@@ -137,7 +137,7 @@ index 3244c76..07fcbf2 100644
  static AlterTSDictionaryStmt *
  _copyAlterTSDictionaryStmt(const AlterTSDictionaryStmt *from)
  {
-@@ -4933,6 +4944,9 @@ copyObject(const void *from)
+@@ -4952,6 +4963,9 @@ copyObject(const void *from)
  		case T_ReassignOwnedStmt:
  			retval = _copyReassignOwnedStmt(from);
  			break;
@@ -148,10 +148,10 @@ index 3244c76..07fcbf2 100644
  			retval = _copyAlterTSDictionaryStmt(from);
  			break;
 diff --git a/src/backend/nodes/equalfuncs.c b/src/backend/nodes/equalfuncs.c
-index 1eb6799..5315a46 100644
+index 448e1a9..04328a4 100644
 --- a/src/backend/nodes/equalfuncs.c
 +++ b/src/backend/nodes/equalfuncs.c
-@@ -2082,6 +2082,15 @@ _equalReassignOwnedStmt(const ReassignOwnedStmt *a, const ReassignOwnedStmt *b)
+@@ -2093,6 +2093,15 @@ _equalReassignOwnedStmt(const ReassignOwnedStmt *a, const ReassignOwnedStmt *b)
  }
  
  static bool
@@ -167,7 +167,7 @@ index 1eb6799..5315a46 100644
  _equalAlterTSDictionaryStmt(const AlterTSDictionaryStmt *a, const AlterTSDictionaryStmt *b)
  {
  	COMPARE_NODE_FIELD(dictname);
-@@ -3237,6 +3246,9 @@ equal(const void *a, const void *b)
+@@ -3251,6 +3260,9 @@ equal(const void *a, const void *b)
  		case T_ReassignOwnedStmt:
  			retval = _equalReassignOwnedStmt(a, b);
  			break;
@@ -178,7 +178,7 @@ index 1eb6799..5315a46 100644
  			retval = _equalAlterTSDictionaryStmt(a, b);
  			break;
 diff --git a/src/backend/parser/gram.y b/src/backend/parser/gram.y
-index 6a0f7b3..809d835 100644
+index cb5cfc4..36600b7 100644
 --- a/src/backend/parser/gram.y
 +++ b/src/backend/parser/gram.y
 @@ -53,6 +53,7 @@
@@ -189,7 +189,7 @@ index 6a0f7b3..809d835 100644
  #include "commands/defrem.h"
  #include "commands/trigger.h"
  #include "nodes/makefuncs.h"
-@@ -227,6 +228,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+@@ -229,6 +230,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  	struct ImportQual	*importqual;
  	InsertStmt			*istmt;
  	VariableSetStmt		*vsetstmt;
@@ -197,7 +197,7 @@ index 6a0f7b3..809d835 100644
  }
  
  %type <node>	stmt schema_stmt
-@@ -372,6 +374,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+@@ -374,6 +376,7 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  				create_generic_options alter_generic_options
  				relation_expr_list dostmt_opt_list
  				transform_element_list transform_type_list
@@ -205,7 +205,7 @@ index 6a0f7b3..809d835 100644
  
  %type <list>	group_by_list
  %type <node>	group_by_item empty_grouping_set rollup_clause cube_clause
-@@ -540,6 +543,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
+@@ -542,6 +545,9 @@ static Node *makeRecursiveViewSelect(char *relname, List *aliases, Node *query);
  %type <str>		opt_existing_window_name
  %type <boolean> opt_if_not_exists
  
@@ -215,7 +215,7 @@ index 6a0f7b3..809d835 100644
  /*
   * Non-keyword token types.  These are hard-wired into the "flex" lexer.
   * They must be listed first so that their numeric codes do not depend on
-@@ -9156,7 +9162,7 @@ AlterTSDictionaryStmt:
+@@ -9158,7 +9164,7 @@ AlterTSDictionaryStmt:
  		;
  
  AlterTSConfigurationStmt:
@@ -224,7 +224,7 @@ index 6a0f7b3..809d835 100644
  				{
  					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
  					n->kind = ALTER_TSCONFIG_ADD_MAPPING;
-@@ -9167,7 +9173,7 @@ AlterTSConfigurationStmt:
+@@ -9169,7 +9175,7 @@ AlterTSConfigurationStmt:
  					n->replace = false;
  					$$ = (Node*)n;
  				}
@@ -233,7 +233,7 @@ index 6a0f7b3..809d835 100644
  				{
  					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
  					n->kind = ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN;
-@@ -9225,6 +9231,33 @@ any_with:	WITH									{}
+@@ -9227,6 +9233,33 @@ any_with:	WITH									{}
  			| WITH_LA								{}
  		;
  
@@ -692,15 +692,15 @@ index a5c2d09..010f0bd 100644
  
  	if (ntups > 0)
 diff --git a/src/include/catalog/catversion.h b/src/include/catalog/catversion.h
-index 2ca3cd9..4df1b26 100644
+index c04edad..0373603 100644
 --- a/src/include/catalog/catversion.h
 +++ b/src/include/catalog/catversion.h
 @@ -53,6 +53,6 @@
   */
  
  /*							yyyymmddN */
--#define CATALOG_VERSION_NO	201608131
-+#define CATALOG_VERSION_NO	201608151
+-#define CATALOG_VERSION_NO	201608231
++#define CATALOG_VERSION_NO	201608241
  
  #endif
 diff --git a/src/include/catalog/pg_ts_config_map.h b/src/include/catalog/pg_ts_config_map.h
@@ -793,10 +793,10 @@ index 0e91bf6..41f6c1a 100644
  
  #endif   /* EVENT_TRIGGER_H */
 diff --git a/src/include/nodes/nodes.h b/src/include/nodes/nodes.h
-index 6b850e4..3664c1c 100644
+index 2f7efa8..4129f12 100644
 --- a/src/include/nodes/nodes.h
 +++ b/src/include/nodes/nodes.h
-@@ -379,6 +379,7 @@ typedef enum NodeTag
+@@ -380,6 +380,7 @@ typedef enum NodeTag
  	T_CreateEnumStmt,
  	T_CreateRangeStmt,
  	T_AlterEnumStmt,
