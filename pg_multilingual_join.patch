@@ -1,6 +1,8 @@
+diff --git a/src/backend/commands/event_trigger.c b/src/backend/commands/event_trigger.c
+index ac4c4ec..0b60f3f 100644
 --- a/src/backend/commands/event_trigger.c
 +++ b/src/backend/commands/event_trigger.c
-@@ -1913,7 +1913,7 @@ EventTriggerCollectCreateOpClass(CreateOpClassStmt *stmt, Oid opcoid,
+@@ -1909,7 +1909,7 @@ EventTriggerCollectCreateOpClass(CreateOpClassStmt *stmt, Oid opcoid,
   */
  void
  EventTriggerCollectAlterTSConfig(AlterTSConfigurationStmt *stmt, Oid cfgId,
@@ -9,7 +11,7 @@
  {
  	MemoryContext oldcxt;
  	CollectedCommand *command;
-@@ -1932,6 +1932,8 @@ EventTriggerCollectAlterTSConfig(AlterTSConfigurationStmt *stmt, Oid cfgId,
+@@ -1928,6 +1928,8 @@ EventTriggerCollectAlterTSConfig(AlterTSConfigurationStmt *stmt, Oid cfgId,
  					 TSConfigRelationId, cfgId);
  	command->d.atscfg.dictIds = palloc(sizeof(Oid) * ndicts);
  	memcpy(command->d.atscfg.dictIds, dictIds, sizeof(Oid) * ndicts);
@@ -91,10 +93,10 @@ index 69c038c..ded3aef 100644
  
  
 diff --git a/src/backend/nodes/copyfuncs.c b/src/backend/nodes/copyfuncs.c
-index c7a0644..d280051 100644
+index 1877fb4..6ce5ce9 100644
 --- a/src/backend/nodes/copyfuncs.c
 +++ b/src/backend/nodes/copyfuncs.c
-@@ -4114,6 +4114,17 @@ _copyReassignOwnedStmt(const ReassignOwnedStmt *from)
+@@ -4115,6 +4115,17 @@ _copyReassignOwnedStmt(const ReassignOwnedStmt *from)
  	return newnode;
  }
  
@@ -112,7 +114,7 @@ index c7a0644..d280051 100644
  static AlterTSDictionaryStmt *
  _copyAlterTSDictionaryStmt(const AlterTSDictionaryStmt *from)
  {
-@@ -4952,6 +4963,9 @@ copyObject(const void *from)
+@@ -4953,6 +4964,9 @@ copyObject(const void *from)
  		case T_ReassignOwnedStmt:
  			retval = _copyReassignOwnedStmt(from);
  			break;
@@ -457,10 +459,10 @@ index f0e4269..8699914 100644
  
  /*
 diff --git a/src/backend/utils/cache/ts_cache.c b/src/backend/utils/cache/ts_cache.c
-index 5e4de43..d60d510 100644
+index 50f1743..92e2aba 100644
 --- a/src/backend/utils/cache/ts_cache.c
 +++ b/src/backend/utils/cache/ts_cache.c
-@@ -417,6 +417,7 @@ lookup_ts_config_cache(Oid cfgId)
+@@ -415,6 +415,7 @@ lookup_ts_config_cache(Oid cfgId)
  		HeapTuple	maptup;
  		ListDictionary maplists[MAXTOKENTYPE + 1];
  		Oid			mapdicts[MAXDICTSPERTT];
@@ -468,7 +470,7 @@ index 5e4de43..d60d510 100644
  		int			maxtokentype;
  		int			ndicts;
  		int			i;
-@@ -503,9 +504,15 @@ lookup_ts_config_cache(Oid cfgId)
+@@ -501,9 +502,15 @@ lookup_ts_config_cache(Oid cfgId)
  										   sizeof(Oid) * ndicts);
  					memcpy(maplists[maxtokentype].dictIds, mapdicts,
  						   sizeof(Oid) * ndicts);
@@ -484,7 +486,7 @@ index 5e4de43..d60d510 100644
  				ndicts = 1;
  			}
  			else
-@@ -513,7 +520,9 @@ lookup_ts_config_cache(Oid cfgId)
+@@ -511,7 +518,9 @@ lookup_ts_config_cache(Oid cfgId)
  				/* continuing data for current token type */
  				if (ndicts >= MAXDICTSPERTT)
  					elog(ERROR, "too many pg_ts_config_map entries for one token type");
@@ -495,7 +497,7 @@ index 5e4de43..d60d510 100644
  			}
  		}
  
-@@ -530,6 +539,10 @@ lookup_ts_config_cache(Oid cfgId)
+@@ -528,6 +537,10 @@ lookup_ts_config_cache(Oid cfgId)
  								   sizeof(Oid) * ndicts);
  			memcpy(maplists[maxtokentype].dictIds, mapdicts,
  				   sizeof(Oid) * ndicts);
