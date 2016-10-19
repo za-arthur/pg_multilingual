@@ -21,7 +21,7 @@ index ac4c4ec..0b60f3f 100644
  	command->parsetree = copyObject(stmt);
  
 diff --git a/src/backend/commands/tsearchcmds.c b/src/backend/commands/tsearchcmds.c
-index 69c038c..ded3aef 100644
+index b240113..fd8523f 100644
 --- a/src/backend/commands/tsearchcmds.c
 +++ b/src/backend/commands/tsearchcmds.c
 @@ -1103,6 +1103,7 @@ DefineTSConfiguration(List *names, List *parameters, ObjectAddress *copied)
@@ -93,10 +93,10 @@ index 69c038c..ded3aef 100644
  
  
 diff --git a/src/backend/nodes/copyfuncs.c b/src/backend/nodes/copyfuncs.c
-index 1877fb4..6ce5ce9 100644
+index 71714bc..50ba9ae 100644
 --- a/src/backend/nodes/copyfuncs.c
 +++ b/src/backend/nodes/copyfuncs.c
-@@ -4115,6 +4115,17 @@ _copyReassignOwnedStmt(const ReassignOwnedStmt *from)
+@@ -4118,6 +4118,17 @@ _copyReassignOwnedStmt(const ReassignOwnedStmt *from)
  	return newnode;
  }
  
@@ -114,7 +114,7 @@ index 1877fb4..6ce5ce9 100644
  static AlterTSDictionaryStmt *
  _copyAlterTSDictionaryStmt(const AlterTSDictionaryStmt *from)
  {
-@@ -4953,6 +4964,9 @@ copyObject(const void *from)
+@@ -4956,6 +4967,9 @@ copyObject(const void *from)
  		case T_ReassignOwnedStmt:
  			retval = _copyReassignOwnedStmt(from);
  			break;
@@ -125,10 +125,10 @@ index 1877fb4..6ce5ce9 100644
  			retval = _copyAlterTSDictionaryStmt(from);
  			break;
 diff --git a/src/backend/nodes/equalfuncs.c b/src/backend/nodes/equalfuncs.c
-index 448e1a9..04328a4 100644
+index 29a090f..1578562 100644
 --- a/src/backend/nodes/equalfuncs.c
 +++ b/src/backend/nodes/equalfuncs.c
-@@ -2093,6 +2093,15 @@ _equalReassignOwnedStmt(const ReassignOwnedStmt *a, const ReassignOwnedStmt *b)
+@@ -2095,6 +2095,15 @@ _equalReassignOwnedStmt(const ReassignOwnedStmt *a, const ReassignOwnedStmt *b)
  }
  
  static bool
@@ -144,7 +144,7 @@ index 448e1a9..04328a4 100644
  _equalAlterTSDictionaryStmt(const AlterTSDictionaryStmt *a, const AlterTSDictionaryStmt *b)
  {
  	COMPARE_NODE_FIELD(dictname);
-@@ -3251,6 +3260,9 @@ equal(const void *a, const void *b)
+@@ -3255,6 +3264,9 @@ equal(const void *a, const void *b)
  		case T_ReassignOwnedStmt:
  			retval = _equalReassignOwnedStmt(a, b);
  			break;
@@ -155,7 +155,7 @@ index 448e1a9..04328a4 100644
  			retval = _equalAlterTSDictionaryStmt(a, b);
  			break;
 diff --git a/src/backend/parser/gram.y b/src/backend/parser/gram.y
-index cb5cfc4..36600b7 100644
+index 5547fc8..6af84ab 100644
 --- a/src/backend/parser/gram.y
 +++ b/src/backend/parser/gram.y
 @@ -53,6 +53,7 @@
@@ -192,7 +192,7 @@ index cb5cfc4..36600b7 100644
  /*
   * Non-keyword token types.  These are hard-wired into the "flex" lexer.
   * They must be listed first so that their numeric codes do not depend on
-@@ -9158,7 +9164,7 @@ AlterTSDictionaryStmt:
+@@ -9181,7 +9187,7 @@ AlterTSDictionaryStmt:
  		;
  
  AlterTSConfigurationStmt:
@@ -201,7 +201,7 @@ index cb5cfc4..36600b7 100644
  				{
  					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
  					n->kind = ALTER_TSCONFIG_ADD_MAPPING;
-@@ -9169,7 +9175,7 @@ AlterTSConfigurationStmt:
+@@ -9192,7 +9198,7 @@ AlterTSConfigurationStmt:
  					n->replace = false;
  					$$ = (Node*)n;
  				}
@@ -210,7 +210,7 @@ index cb5cfc4..36600b7 100644
  				{
  					AlterTSConfigurationStmt *n = makeNode(AlterTSConfigurationStmt);
  					n->kind = ALTER_TSCONFIG_ALTER_MAPPING_FOR_TOKEN;
-@@ -9227,6 +9233,33 @@ any_with:	WITH									{}
+@@ -9250,6 +9256,33 @@ any_with:	WITH									{}
  			| WITH_LA								{}
  		;
  
@@ -244,6 +244,19 @@ index cb5cfc4..36600b7 100644
  
  /*****************************************************************************
   *
+diff --git a/src/backend/tsearch/dict_simple.c b/src/backend/tsearch/dict_simple.c
+index e3f06db..91bc109 100644
+--- a/src/backend/tsearch/dict_simple.c
++++ b/src/backend/tsearch/dict_simple.c
+@@ -62,7 +62,7 @@ dsimple_init(PG_FUNCTION_ARGS)
+ 		{
+ 			ereport(ERROR,
+ 					(errcode(ERRCODE_INVALID_PARAMETER_VALUE),
+-				   errmsg("unrecognized simple dictionary parameter: \"%s\"",
++					errmsg("unrecognized simple dictionary parameter: \"%s\"",
+ 						  defel->defname)));
+ 		}
+ 	}
 diff --git a/src/backend/tsearch/ts_parse.c b/src/backend/tsearch/ts_parse.c
 index f0e4269..8699914 100644
 --- a/src/backend/tsearch/ts_parse.c
@@ -509,7 +522,7 @@ index 50f1743..92e2aba 100644
  			entry->lenmap = maxtokentype + 1;
  			entry->map = (ListDictionary *)
 diff --git a/src/bin/pg_dump/pg_dump.c b/src/bin/pg_dump/pg_dump.c
-index a5c2d09..010f0bd 100644
+index 4da297f..4ef5255 100644
 --- a/src/bin/pg_dump/pg_dump.c
 +++ b/src/bin/pg_dump/pg_dump.c
 @@ -53,6 +53,7 @@
@@ -520,7 +533,7 @@ index a5c2d09..010f0bd 100644
  #include "catalog/pg_type.h"
  #include "libpq/libpq-fs.h"
  
-@@ -14109,6 +14110,7 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+@@ -12938,6 +12939,7 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
  				i;
  	int			i_tokenname;
  	int			i_dictname;
@@ -528,7 +541,7 @@ index a5c2d09..010f0bd 100644
  
  	/* Skip if not to be dumped */
  	if (!cfginfo->dobj.dump || dopt->dataOnly)
-@@ -14147,7 +14149,8 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+@@ -12976,7 +12978,8 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
  					  "SELECT \n"
  					  "  ( SELECT alias FROM pg_catalog.ts_token_type('%u'::pg_catalog.oid) AS t \n"
  					  "    WHERE t.tokid = m.maptokentype ) AS tokenname, \n"
@@ -538,7 +551,7 @@ index a5c2d09..010f0bd 100644
  					  "FROM pg_catalog.pg_ts_config_map AS m \n"
  					  "WHERE m.mapcfg = '%u' \n"
  					  "ORDER BY m.mapcfg, m.maptokentype, m.mapseqno",
-@@ -14158,11 +14161,13 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+@@ -12987,11 +12990,13 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
  
  	i_tokenname = PQfnumber(res, "tokenname");
  	i_dictname = PQfnumber(res, "dictname");
@@ -552,7 +565,7 @@ index a5c2d09..010f0bd 100644
  
  		if (i == 0 ||
  			strcmp(tokenname, PQgetvalue(res, i - 1, i_tokenname)) != 0)
-@@ -14178,6 +14183,10 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
+@@ -13007,6 +13012,10 @@ dumpTSConfig(Archive *fout, TSConfigInfo *cfginfo)
  		}
  		else
  			appendPQExpBuffer(q, ", %s", dictname);
@@ -564,15 +577,15 @@ index a5c2d09..010f0bd 100644
  
  	if (ntups > 0)
 diff --git a/src/include/catalog/catversion.h b/src/include/catalog/catversion.h
-index c04edad..0373603 100644
+index bfa6b87..d9f408c 100644
 --- a/src/include/catalog/catversion.h
 +++ b/src/include/catalog/catversion.h
 @@ -53,6 +53,6 @@
   */
  
  /*							yyyymmddN */
--#define CATALOG_VERSION_NO	201608231
-+#define CATALOG_VERSION_NO	201608241
+-#define CATALOG_VERSION_NO	201610121
++#define CATALOG_VERSION_NO	201610191
  
  #endif
 diff --git a/src/include/catalog/pg_ts_config_map.h b/src/include/catalog/pg_ts_config_map.h
@@ -665,7 +678,7 @@ index 0e91bf6..41f6c1a 100644
  
  #endif   /* EVENT_TRIGGER_H */
 diff --git a/src/include/nodes/nodes.h b/src/include/nodes/nodes.h
-index 2f7efa8..4129f12 100644
+index 88297bb..2df89e2 100644
 --- a/src/include/nodes/nodes.h
 +++ b/src/include/nodes/nodes.h
 @@ -380,6 +380,7 @@ typedef enum NodeTag
@@ -677,10 +690,10 @@ index 2f7efa8..4129f12 100644
  	T_AlterTSConfigurationStmt,
  	T_CreateFdwStmt,
 diff --git a/src/include/nodes/parsenodes.h b/src/include/nodes/parsenodes.h
-index 1481fff..c0848c9 100644
+index 6de2cab..42b5f53 100644
 --- a/src/include/nodes/parsenodes.h
 +++ b/src/include/nodes/parsenodes.h
-@@ -3084,6 +3084,16 @@ typedef enum AlterTSConfigType
+@@ -3087,6 +3087,16 @@ typedef enum AlterTSConfigType
  	ALTER_TSCONFIG_DROP_MAPPING
  } AlterTSConfigType;
  
@@ -697,7 +710,7 @@ index 1481fff..c0848c9 100644
  typedef struct AlterTSConfigurationStmt
  {
  	NodeTag		type;
-@@ -3095,7 +3105,7 @@ typedef struct AlterTSConfigurationStmt
+@@ -3098,7 +3108,7 @@ typedef struct AlterTSConfigurationStmt
  	 * NIL, but tokentype isn't, DROP MAPPING was specified.
  	 */
  	List	   *tokentype;		/* list of Value strings */
